@@ -9,3 +9,4 @@ _DS_Store
 **/output/**/*.txt
 /dist/
 /build/
+results/*

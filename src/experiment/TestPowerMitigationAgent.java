@@ -46,11 +46,12 @@ public class TestPowerMitigationAgent extends SimulatedExperiment{
     //Simulation Parameters
     private final static int bootstrapTime=2000;
     private final static int runTime=1000;
-    private final static int runDuration=50;
+    private final static int runDuration=5;
     private final static int N=1;
     
        public static void main(String[] args) {
         double relCapacityChange = 1.0;
+        int linkTransformer[] = new int[]{30, 3, 12, 44, 6};
         
         Experiment.initEnvironment();
         final TestPowerMitigationAgent test = new TestPowerMitigationAgent();
@@ -61,7 +62,8 @@ public class TestPowerMitigationAgent extends SimulatedExperiment{
                 Peer newPeer = new Peer(peerIndex);
                 newPeer.addPeerlet(new PowerMitigationAgent(
                         experimentID,
-                        relCapacityChange));
+                        relCapacityChange,
+                        linkTransformer));
                 newPeer.addPeerlet(new InterpssFlowDomainAgent());
 //                newPeer.addPeerlet(new MatpowerFlowDomainAgent());
                 newPeer.addPeerlet(new TimeSteppingAgent(

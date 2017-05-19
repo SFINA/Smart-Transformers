@@ -5,154 +5,132 @@
  */
 package agent;
 
-/**
- *
- * @author jose
- */
-
-import agent.PowerCascadeAgent;
-import event.Event;
-import event.EventType;
-import event.NetworkComponent;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import network.FlowNetwork;
 import network.Link;
-import network.LinkState;
-import network.Node;
 import org.apache.log4j.Logger;
 import power.backend.PowerFlowType;
-import power.input.PowerNodeType;
 import power.backend.PowerBackendParameter;
 import power.input.PowerLinkState;
-import power.input.PowerNodeState;
-import protopeer.measurement.MeasurementFileDumper;
-import protopeer.measurement.MeasurementLog;
-import protopeer.measurement.MeasurementLoggerListener;
-import protopeer.util.quantities.Time;
-
-import agent.LinkTransformer;
-
 
 import gurobi.*;
+
+/**
+ * Cascading failures mitigation strategy with Smart Transformers. 
+ * 
+ * @author jose
+ */
 
 public class PowerMitigationAgent extends PowerCascadeAgent {
 
     private static final Logger logger = Logger.getLogger(PowerMitigationAgent.class);
     private Double relRateChangePerEpoch;
-    private ArrayList<Node> generators; 
+    private int[] linkTransformer;
     private ArrayList<Link> PST;
-    private HashMap<String,HashMap<String,Double>> controlAction;
-    private HashMap<String,Double> initialFlow;
-    private HashMap<String,Double> actualAngle;
-    //private ArrayList<String> PST1;
-    private Node slack;
+
 
     public PowerMitigationAgent(String experimentID,
-            Double relRateChangePerEpoch) {
+            Double relRateChangePerEpoch,
+            int[] linkTransformer) {
         super(experimentID,
                 relRateChangePerEpoch);
         this.relRateChangePerEpoch = relRateChangePerEpoch;
+        this.linkTransformer = linkTransformer;
     }
     
-
+    /**
+     * Implements the mitigation strategy.
+     * 
+     * @param flowNetwork 
+     */
     @Override
     public void mitigateOverload(FlowNetwork flowNetwork){
         logger.debug("mitigation algorithm");
         PST = new ArrayList(); 
-        initialFlow = new HashMap<>();
-        controlAction = new HashMap<>();
-//        actualAngle = new HashMap<>();
         
         PowerFlowType flowType = (PowerFlowType)getFlowDomainAgent().getDomainParameters().get(PowerBackendParameter.FLOW_TYPE);
 
-        
         setSmartTransformer(flowNetwork);
         setFlowTypeParameter(PowerFlowType.DC);
         getControlAction(flowNetwork, PST);
         setFlowTypeParameter(flowType);
         pstAction (PST,flowNetwork);
-        //setFlowTypeParameter(flowType);
         getFlowDomainAgent().flowAnalysis(flowNetwork);
         
     }
     
+    /**
+     * Sets the flow type parameter. AC or DC
+     * @param flowType 
+     */
     public void setFlowTypeParameter(PowerFlowType flowType) {
         this.getFlowDomainAgent().getDomainParameters().put(PowerBackendParameter.FLOW_TYPE, flowType);
     }
 
+    /**
+     * Placement of the Smart transformers.
+     * @param flowNetwork 
+     */
     private void setSmartTransformer(FlowNetwork flowNetwork){
-//        int l[] = new int[] {30,22,24};
-        int l[] = new int[] {30, 3, 12, 44, 6};
-//        int l[] = new int[] {};
+        int l[] =this.linkTransformer;
         List<Integer> listPST = new ArrayList<>();
         for (int i=0;i<l.length;i++){
             listPST.add(l[i]);
         }
         
-//        listPST.add(30);
-//        listPST.add(22);//21
-//        listPST.add(24);//25
-//        int listPST[] = new int[]{30,22,24};
-        //listPST.add(26);
         for (Link link : flowNetwork.getLinks()){
-            //logger.debug(link.getIndex());
             if ( listPST.contains( Integer.parseInt( link.getIndex() )) && link.isActivated() ){
-                logger.debug(" adding link");
+//                logger.debug(" adding link");
                 PST.add(link);
             }
         }   
     }
     
+    /**
+     * Calculates the initial flow and the control action.
+     * @param flowNetwork
+     * @param PST 
+     */
     private void getControlAction (FlowNetwork flowNetwork, 
                                     ArrayList<Link> PST){
-        //HashMap<String,Double> initialFlow = new HashMap<String,Double>();
-        // HashMap<String,HashMap<String,Double>> controlAction = new HashMap<>();
-        // double actualAngle;
         double epsilon = 0.001;
         getFlowDomainAgent().flowAnalysis(flowNetwork); //(double)(flowNetwork.getLink(key).getProperty(PowerLinkState.POWER_FLOW_FROM_REAL))/flowNetwork.getLink(key).getCapacity()
         for (Link link :flowNetwork.getLinks()){
             link.addProperty(LinkTransformer.INITIAL_FLOW, (double)(link.getProperty(PowerLinkState.POWER_FLOW_FROM_REAL))/link.getCapacity());
-            initialFlow.put(link.getIndex(), (double)(link.getProperty(PowerLinkState.POWER_FLOW_FROM_REAL))/link.getCapacity()); ///link.getCapacity()
         }
         System.out.println(" ");
         for (Link link : PST){
             link.addProperty(LinkTransformer.ANGLE,  link.getProperty(PowerLinkState.ANGLE_SHIFT));
-//            actualAngle.put(link.getIndex(),(double) link.getProperty(PowerLinkState.ANGLE_SHIFT));
-            //link.replacePropertyElement(PowerLinkState.ANGLE_SHIFT,actualAngle.get(link.getIndex())+ 1.0); // change here for previous angle
             link.replacePropertyElement(PowerLinkState.ANGLE_SHIFT,(double) link.getProperty(LinkTransformer.ANGLE)+ 1.0); // change here for previous angle
-            logger.debug("changing angle");
+//            logger.debug("changing angle");
             getFlowDomainAgent().flowAnalysis(flowNetwork);
             HashMap<String,Double> auxMap = new HashMap<>(); 
             for (Link link1:flowNetwork.getLinks()){
-                double action = ((double)(link1.getProperty(PowerLinkState.POWER_FLOW_FROM_REAL))/(link1.getCapacity()))- (double)link1.getProperty(LinkTransformer.INITIAL_FLOW);///(link1.getCapacity())
-                //logger.debug(action);
+                double action = ((double)(link1.getProperty(PowerLinkState.POWER_FLOW_FROM_REAL))/(link1.getCapacity()))- (double)link1.getProperty(LinkTransformer.INITIAL_FLOW);
                 if (action < -epsilon || epsilon< action){
-                    //logger.debug("not null");
                     auxMap.put(link1.getIndex(),action/1.0);
                 }
                 else{
-                    //logger.debug("null " + link1.getIndex() + " " + action);
                     auxMap.put(link1.getIndex(),null);
                 }
-                //controlAction.put( link.getIndex(), new HashMap(){{put(link1.getIndex(),(link1.getFlow()- initialFlow.get(link1.getIndex()))/(link1.getCapacity() ) );}}  );
-                //logger.debug(String.valueOf( link1.getFlow() - initialFlow.get(link1.getIndex())   )); //link1.getFlow()
-                //logger.debug(String.valueOf(controlAction.get(link.getIndex()).get(link1.getIndex())    ));
             }
             link.addProperty(LinkTransformer.CONTROL_ACTION, auxMap);
-            controlAction.put( link.getIndex(),auxMap);
-            //link.replacePropertyElement(PowerLinkState.ANGLE_SHIFT,actualAngle.get(link.getIndex()));
             link.replacePropertyElement(PowerLinkState.ANGLE_SHIFT,(double) link.getProperty(LinkTransformer.ANGLE));
         }   
     }
     
+    /**
+     * Formulates and solves the optimization problem.
+     * Two mitigation strategies are implemented. 
+     * Gurobi API and solver are used to solve the QP and MILP problems.
+     * 
+     * @param PST
+     * @param flowNetwork 
+     */
     private void pstAction (ArrayList<Link> PST,
             FlowNetwork flowNetwork){
-        //logger.debug(String.valueOf(initialFlow.get("0"))); 
         try{
             double M = 30.0;
             double epsilon = 0.001;
@@ -163,19 +141,12 @@ public class PowerMitigationAgent extends PowerCascadeAgent {
             
             HashMap<String,GRBVar> xl = new HashMap<>();
             HashMap<String,GRBVar> anglel = new HashMap<>();
-            
-            
-//            for(String key : initialFlow.keySet()){
-//                xl.put(key,model.addVar(-M, M, 0.0, GRB.CONTINUOUS, "xi" + key));
-//            }
+
             for(Link link: flowNetwork.getLinks()){
                 xl.put(link.getIndex(),model.addVar(-M, M, 0.0, GRB.CONTINUOUS, "xi" + link.getIndex()));
             }
             model.update();
 
-//            for (String key : controlAction.keySet()){
-//                anglel.put(key, model.addVar(-7.0, 7.0, 0.0, GRB.CONTINUOUS, "angle" + key));
-//            }
 
             for (Link link: PST){
                 anglel.put(link.getIndex(), model.addVar(-7.0, 7.0, 0.0, GRB.CONTINUOUS, "angle" + link.getIndex()));
@@ -200,7 +171,6 @@ public class PowerMitigationAgent extends PowerCascadeAgent {
                 GRBLinExpr lhs = new GRBLinExpr();
                 GRBLinExpr rhs = new GRBLinExpr();
                 lhs.addTerm(1.0, xl.get(link.getIndex()));
-                //logger.debug(initialFlow.get(key));
                 rhs.addConstant((double) link.getProperty(LinkTransformer.INITIAL_FLOW)); //initialFlow.get(key)
                 HashMap<String,Double> auxMap = new HashMap<>();
                 for (Link link1: PST){
@@ -213,7 +183,7 @@ public class PowerMitigationAgent extends PowerCascadeAgent {
             }
             model.update();
             
-            if (true){ // change condition, is temporal
+            if (true){ 
                 HashMap<String,GRBVar> z_pos = new HashMap<>();
                 HashMap<String,GRBVar> z_neg = new HashMap<>();
                 double beta[] = new double[]{0.60,0.8,0.9};
@@ -281,12 +251,6 @@ public class PowerMitigationAgent extends PowerCascadeAgent {
 
                 model.optimize();
                 
-                //for (String key: xl.keySet()){
-                    //logger.debug(key +" " +  xl.get(key).get(GRB.DoubleAttr.X));
-                    //logger.debug(z_pos.get(key).get(GRB.DoubleAttr.X));
-                    //logger.debug(z_neg.get(key).get(GRB.DoubleAttr.X));
-                //}
-                
             }
             else{
                 GRBQuadExpr obj = new GRBQuadExpr();
@@ -299,19 +263,16 @@ public class PowerMitigationAgent extends PowerCascadeAgent {
                 model.optimize();
             }
             
-            for (Link link: PST){
-                link.replacePropertyElement(PowerLinkState.ANGLE_SHIFT,(double) link.getProperty(LinkTransformer.ANGLE) + anglel.get(link.getIndex()).get(GRB.DoubleAttr.X)); // sum previous angle
-                logger.debug(link.getIndex()+" "+ link.getProperty(PowerLinkState.ANGLE_SHIFT));
-            }
+//            for (Link link: PST){
+//                link.replacePropertyElement(PowerLinkState.ANGLE_SHIFT,(double) link.getProperty(LinkTransformer.ANGLE) + anglel.get(link.getIndex()).get(GRB.DoubleAttr.X)); // sum previous angle
+//                logger.debug(link.getIndex()+" "+ link.getProperty(PowerLinkState.ANGLE_SHIFT));
+//            }
             getFlowDomainAgent().flowAnalysis(flowNetwork);
-            //for (String key: anglel.keySet()){
-            //    logger.debug(anglel.get(key).get(GRB.DoubleAttr.X));
-            //}
-            for (String key: xl.keySet()){
-                logger.debug(key +" " +  xl.get(key).get(GRB.DoubleAttr.X)+ " real "+ 
-                        (double)(flowNetwork.getLink(key).getProperty(PowerLinkState.POWER_FLOW_FROM_REAL))/flowNetwork.getLink(key).getCapacity());
-                
-            }
+//            for (String key: xl.keySet()){
+//                logger.debug(key +" " +  xl.get(key).get(GRB.DoubleAttr.X)+ " real "+ 
+//                        (double)(flowNetwork.getLink(key).getProperty(PowerLinkState.POWER_FLOW_FROM_REAL))/flowNetwork.getLink(key).getCapacity());
+//                
+//            }
             
             model.dispose();
             env.dispose();
