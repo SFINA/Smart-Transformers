@@ -1,10 +1,23 @@
 /*
- * To change this license header, choose License Headers in Project Properties.
- * To change this template file, choose Tools | Templates
- * and open the template in the editor.
+ * Copyright (C) 2016 SFINA Team
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
  */
 package agent;
 
+import power.smarttransformer.LinkTransformer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.HashMap;
@@ -15,7 +28,10 @@ import power.backend.PowerFlowType;
 import power.backend.PowerBackendParameter;
 import power.input.PowerLinkState;
 
+import power.smarttransformer.SmartTransformerParameter;
+
 import gurobi.*;
+import power.smarttransformer.SmartTransformerLoader;
 
 /**
  * Cascading failures mitigation strategy with Smart Transformers. 
@@ -29,6 +45,9 @@ public class PowerMitigationAgent extends PowerCascadeAgent {
     private Double relRateChangePerEpoch;
     private int[] linkTransformer;
     private ArrayList<Link> PST;
+    private Double PST_Algo;
+    public HashMap<Enum,Object> transformerParameters;
+    private static String experimentID;
 
 
     public PowerMitigationAgent(String experimentID,
@@ -38,6 +57,7 @@ public class PowerMitigationAgent extends PowerCascadeAgent {
                 relRateChangePerEpoch);
         this.relRateChangePerEpoch = relRateChangePerEpoch;
         this.linkTransformer = linkTransformer;
+        this.experimentID=experimentID;
     }
     
     /**
@@ -47,17 +67,24 @@ public class PowerMitigationAgent extends PowerCascadeAgent {
      */
     @Override
     public void mitigateOverload(FlowNetwork flowNetwork){
+        
+        SmartTransformerLoader smartTransformerLoader= new SmartTransformerLoader(getFlowDomainAgent().getParameterColumnSeparator());
+        transformerParameters=smartTransformerLoader.loadSmartTransformerParameters("experiments/"+experimentID+"/peer-0/input/transformerApplication.txt"); 
+        PST_Algo = (Double) transformerParameters.get(SmartTransformerParameter.ALGORITHM);
+        
         logger.debug("mitigation algorithm");
         PST = new ArrayList(); 
         
         PowerFlowType flowType = (PowerFlowType)getFlowDomainAgent().getDomainParameters().get(PowerBackendParameter.FLOW_TYPE);
 
-        setSmartTransformer(flowNetwork);
-        setFlowTypeParameter(PowerFlowType.DC);
-        getControlAction(flowNetwork, PST);
-        setFlowTypeParameter(flowType);
-        pstAction (PST,flowNetwork);
-        getFlowDomainAgent().flowAnalysis(flowNetwork);
+        if (PST_Algo != 0.0){
+            setSmartTransformer(flowNetwork);
+            setFlowTypeParameter(PowerFlowType.DC);
+            getControlAction(flowNetwork, PST);
+            setFlowTypeParameter(flowType);
+            pstAction (PST,flowNetwork);
+            getFlowDomainAgent().flowAnalysis(flowNetwork);
+        }
         
     }
     
@@ -74,15 +101,14 @@ public class PowerMitigationAgent extends PowerCascadeAgent {
      * @param flowNetwork 
      */
     private void setSmartTransformer(FlowNetwork flowNetwork){
-        int l[] =this.linkTransformer;
+        String[] l  = transformerParameters.get(SmartTransformerParameter.LOCATION).toString().split(",");
         List<Integer> listPST = new ArrayList<>();
         for (int i=0;i<l.length;i++){
-            listPST.add(l[i]);
+            listPST.add(Integer.parseInt(l[i]));
         }
         
         for (Link link : flowNetwork.getLinks()){
             if ( listPST.contains( Integer.parseInt( link.getIndex() )) && link.isActivated() ){
-//                logger.debug(" adding link");
                 PST.add(link);
             }
         }   
@@ -96,15 +122,13 @@ public class PowerMitigationAgent extends PowerCascadeAgent {
     private void getControlAction (FlowNetwork flowNetwork, 
                                     ArrayList<Link> PST){
         double epsilon = 0.001;
-        getFlowDomainAgent().flowAnalysis(flowNetwork); //(double)(flowNetwork.getLink(key).getProperty(PowerLinkState.POWER_FLOW_FROM_REAL))/flowNetwork.getLink(key).getCapacity()
+        getFlowDomainAgent().flowAnalysis(flowNetwork); 
         for (Link link :flowNetwork.getLinks()){
             link.addProperty(LinkTransformer.INITIAL_FLOW, (double)(link.getProperty(PowerLinkState.POWER_FLOW_FROM_REAL))/link.getCapacity());
         }
-        System.out.println(" ");
         for (Link link : PST){
             link.addProperty(LinkTransformer.ANGLE,  link.getProperty(PowerLinkState.ANGLE_SHIFT));
-            link.replacePropertyElement(PowerLinkState.ANGLE_SHIFT,(double) link.getProperty(LinkTransformer.ANGLE)+ 1.0); // change here for previous angle
-//            logger.debug("changing angle");
+            link.replacePropertyElement(PowerLinkState.ANGLE_SHIFT,(double) link.getProperty(LinkTransformer.ANGLE)+ 1.0); 
             getFlowDomainAgent().flowAnalysis(flowNetwork);
             HashMap<String,Double> auxMap = new HashMap<>(); 
             for (Link link1:flowNetwork.getLinks()){
@@ -183,7 +207,7 @@ public class PowerMitigationAgent extends PowerCascadeAgent {
             }
             model.update();
             
-            if (true){ 
+            if (PST_Algo==1.0){ 
                 HashMap<String,GRBVar> z_pos = new HashMap<>();
                 HashMap<String,GRBVar> z_neg = new HashMap<>();
                 double beta[] = new double[]{0.60,0.8,0.9};
@@ -263,16 +287,6 @@ public class PowerMitigationAgent extends PowerCascadeAgent {
                 model.optimize();
             }
             
-//            for (Link link: PST){
-//                link.replacePropertyElement(PowerLinkState.ANGLE_SHIFT,(double) link.getProperty(LinkTransformer.ANGLE) + anglel.get(link.getIndex()).get(GRB.DoubleAttr.X)); // sum previous angle
-//                logger.debug(link.getIndex()+" "+ link.getProperty(PowerLinkState.ANGLE_SHIFT));
-//            }
-            getFlowDomainAgent().flowAnalysis(flowNetwork);
-//            for (String key: xl.keySet()){
-//                logger.debug(key +" " +  xl.get(key).get(GRB.DoubleAttr.X)+ " real "+ 
-//                        (double)(flowNetwork.getLink(key).getProperty(PowerLinkState.POWER_FLOW_FROM_REAL))/flowNetwork.getLink(key).getCapacity());
-//                
-//            }
             
             model.dispose();
             env.dispose();

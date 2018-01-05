@@ -1,0 +1,3 @@
+flowType=AC
+toleranceParameter=1.0
+smartTransformer=1.0

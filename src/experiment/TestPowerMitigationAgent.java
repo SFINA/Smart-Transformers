@@ -34,24 +34,24 @@ import protopeer.util.quantities.Time;
 
 /**
  *
- * @author Ben
+ * @author jose
  */
 public class TestPowerMitigationAgent extends SimulatedExperiment{
     
     private static final Logger logger = Logger.getLogger(TestPowerMitigationAgent.class);
     
-    private final static String expSeqNum="02";
+    private final static String expSeqNum="09";
     private static String experimentID="experiment-"+expSeqNum;
     
     //Simulation Parameters
     private final static int bootstrapTime=2000;
     private final static int runTime=1000;
-    private final static int runDuration=5;
+    private final static int runDuration=46;
     private final static int N=1;
     
        public static void main(String[] args) {
         double relCapacityChange = 1.0;
-        int linkTransformer[] = new int[]{30, 3, 12, 44, 6};
+        int linkTransformer[] = new int[]{0};
         
         Experiment.initEnvironment();
         final TestPowerMitigationAgent test = new TestPowerMitigationAgent();
@@ -63,7 +63,7 @@ public class TestPowerMitigationAgent extends SimulatedExperiment{
                 newPeer.addPeerlet(new PowerMitigationAgent(
                         experimentID,
                         relCapacityChange,
-                        linkTransformer));
+                        linkTransformer ));
                 newPeer.addPeerlet(new InterpssFlowDomainAgent());
 //                newPeer.addPeerlet(new MatpowerFlowDomainAgent());
                 newPeer.addPeerlet(new TimeSteppingAgent(
